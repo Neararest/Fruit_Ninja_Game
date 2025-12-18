@@ -1,45 +1,53 @@
 # Fruit Ninja Game
 
-Game Fruit Ninja sederhana berbasis Python, OpenCV, dan Pygame dengan mode Solo dan Multiplayer.
+Game Fruit Ninja sederhana berbasis Python, OpenCV, dan Pygame dengan mode Solo dan Multiplayer. Pemain memotong buah dengan gerakan tangan di depan kamera (hand tracking).
 
 ## Fitur
 
-- Kontrol menggunakan gerakan tangan (hand tracking dengan kamera web).
-- Mode Solo dengan skor, level, dan nyawa.
-- Mode Multiplayer untuk 2 pemain (P1 dan P2) di satu kamera.
-- Penyimpanan data skor ke file Excel.
+- Kontrol menggunakan gerakan tangan (webcam + hand tracking).
+- Mode Solo (skor, level, batas miss).
+- Mode Multiplayer untuk 2 pemain (P1 dan P2) dalam satu kamera.
+- Beberapa tema/background (kayu, kaktus, salju, sakura).
+- Efek suara dan tampilan Game Over dengan kartu skor dan tombol:
+  - Kembali ke menu
+  - Main ulang
+  - Simpan data skor ke Excel
 
 ## Kebutuhan
 
 - Python 3.10+
 - PIP
 - Webcam
+- Sistem operasi yang mendukung Python dan Pygame
 
-Semua dependency bisa di-install dari `requirements.txt`.
+Semua dependency di-install lewat `requirements.txt`.
 
-## Cara Menjalankan
+## Instalasi & Menjalankan
 
 1. Clone repository ini:
-    git clone https://github.com/Neararest/Fruit_Ninja_Game.git
-    cd Fruit_Ninja_Game
+   git clone https://github.com/Neararest/Fruit_Ninja_Game.git
 
-2. Install dependency:
+2. Pindah ke folder Fruit_Ninja_Game
+   cd Fruit_Ninja_Game
+
+3. Install dependency:
    pip install -r requirements.txt
 
-3. Jalankan game:
-    python main.py
+4. Jalankan game:
+   python main.py
 
 ## Cara Main
 
-- Pastikan webcam aktif dan menghadap pemain.
-- Gunakan tangan untuk “memotong” buah di layar.
-- Hindari bom; jika kena bom atau terlalu banyak miss, game akan berakhir.
-- Di mode multiplayer, sisi kiri untuk Player 1 dan sisi kanan untuk Player 2.
+- Pilih mode Solo atau Multi di menu.
+- Gerakkan jari di depan kamera untuk memotong buah.
+- Hindari bom dan jangan terlalu banyak miss.
+- Di Multiplayer, sisi kiri untuk Player 1 dan sisi kanan untuk Player 2.
+- Setelah Game Over, gunakan tombol di card untuk kembali ke menu, restart, atau menyimpan skor.
 
 ## Struktur Folder
 
 - `assets/` – gambar, suara, font.
-- `core/` – logika utama (fruit, sound, hand tracker, penyimpanan data).
-- `game/` – file game solo dan multiplayer.
-- `ui/` – kode menu dan tampilan lain.
-- `main.py` – entry point untuk menjalankan game.
+- `core/` – logika buah, hand tracking, suara, dan simpan data.
+- `game/` – `solo_game.py` dan `multi_game.py`.
+- `ui/` – kode menu dan navigasi.
+- `main.py` – entry point aplikasi.
