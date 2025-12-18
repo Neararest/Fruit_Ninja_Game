@@ -102,8 +102,8 @@ class SoloFruitNinjaGame:
         scale_y = self.HEIGHT / cam_h
 
         for hand_lms in result.multi_hand_landmarks:
-            x = int(hand_lms.landmark[12].x * cam_w * scale_x)
-            y = int(hand_lms.landmark[12].y * cam_h * scale_y)
+            x = int(hand_lms.landmark[8].x * cam_w * scale_x)
+            y = int(hand_lms.landmark[8].y * cam_h * scale_y)
 
             # Smoothing buffer
             self.x_buffer.append(x)
@@ -114,7 +114,6 @@ class SoloFruitNinjaGame:
             x = int(sum(self.x_buffer) / len(self.x_buffer))
             y = int(sum(self.y_buffer) / len(self.y_buffer))
 
-            # Draw pointer
             cv2.circle(frame, (x, y), 20, (0, 140, 255), -1)
             cv2.circle(frame, (x, y), 10, (0, 255, 255), -1)
 
@@ -126,7 +125,6 @@ class SoloFruitNinjaGame:
             self.pointer_history.append((x, y, now))
             self.pointer_history = [p for p in self.pointer_history if now - p[2] < 0.25]
 
-            # Slice detection
             if self.prev_x is not None and self.prev_y is not None:
                 for fruit in self.fruits:
                     if fruit.alive and not fruit.cut:
@@ -166,11 +164,9 @@ class SoloFruitNinjaGame:
                             self.go_start_ticks = pygame.time.get_ticks()
                             self.game_over_time = time.time()
 
-        # Respawn fruits
         for i in range(len(self.fruits)):
             if not self.fruits[i].alive or self.fruits[i].cut:
                 self.fruits[i] = self.fruit_manager.spawn_fruit_solo(self.level)
-
     
     def _setup_gameover_ui(self):
         cx = self.WIDTH // 2
@@ -214,7 +210,6 @@ class SoloFruitNinjaGame:
                 cv2.putText(frame, f"Level: {self.level}", (30, 180),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0,255,255), 3)
             
-            # Render game
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             surface = pygame.surfarray.make_surface(frame_rgb.swapaxes(0, 1))
             self.screen.blit(surface, (0, 0))
@@ -264,7 +259,6 @@ class SoloFruitNinjaGame:
             pygame.display.flip()
             self.clock.tick(20)
 
-            #Event handling
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self._cleanup()

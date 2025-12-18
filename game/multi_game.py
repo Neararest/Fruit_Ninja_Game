@@ -166,7 +166,6 @@ class MultiFruitNinjaGame:
             fx, fy = fruit.x, fruit.y
             fh, fw = fruit.img.shape[:2]
             
-            # P1 slice
             if self.p1_alive and self.p1_prev is not None:
                 px, py = self.p1_prev
                 if fx < px < fx + fw and fy < py < fy + fh:
@@ -187,7 +186,6 @@ class MultiFruitNinjaGame:
                             self.level += 1
                             self.sounds.play("levelup")
             
-            # P2 slice 
             if self.p2_alive and self.p2_prev is not None and not fruit.cut:
                 px, py = self.p2_prev
                 if fx < px < fx + fw and fy < py < fy + fh:
@@ -211,7 +209,6 @@ class MultiFruitNinjaGame:
         return frame
 
     def _update_fruits(self):
-        # Move fruits
         for fruit in self.fruits:
             if fruit.alive:
                 fruit.y += fruit.vy
@@ -283,7 +280,6 @@ class MultiFruitNinjaGame:
                 elapsed = pygame.time.get_ticks() - self.go_start_ticks
 
                 if self.show_go_screen and elapsed < self.GO_DURATION:
-                    # FASE 1: hanya teks GAME OVER
                     font_go = pygame.font.Font(self.FONT, 96)
                     go_text = font_go.render("GAME OVER", True, (255, 60, 60))
                     go_rect = go_text.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 2))
@@ -327,7 +323,6 @@ class MultiFruitNinjaGame:
             pygame.display.flip()
             self.clock.tick(20)
 
-            # Event handling
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self._cleanup()

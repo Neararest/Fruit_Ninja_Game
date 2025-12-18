@@ -41,17 +41,14 @@ class MenuApp:
         self.back_img = pygame.image.load("assets/images2/kembali.png")
         self.back_img = pygame.transform.scale(self.back_img, (200, 90))
 
-    # Fungsi helper untuk interpolasi (animasi halus)
     def lerp(self, a, b, t):
         return a + (b - a) * t
 
-    # Gambar background yang mengikuti ukuran window
     def blit_scaled_background(self):
         w, h = self.screen.get_size()
         bg_scaled = pygame.transform.scale(self.bg_main, (w, h))
         self.screen.blit(bg_scaled, (0, 0))
 
-    # Reset layar 
     def reset_layar(self):
         pygame.display.quit()
         pygame.display.init()
@@ -60,7 +57,6 @@ class MenuApp:
         self.bg_main = pygame.image.load(self.themes[self.selected_theme])
         self.bg_main = pygame.transform.scale(self.bg_main, (self.WIDTH, self.HEIGHT))
 
-    # Efek fade hitam (transisi antar menu / game)
     def fade_transition(self):
         width, height = self.screen.get_size()
         fade = pygame.Surface((width, height))
@@ -83,7 +79,6 @@ class MenuApp:
             
             pygame.time.delay(10)
 
-    # Hover Btn
     def draw_image_button(self, image_path, pos, scale=None, anim_speed=0.15):
         if scale is None:
             scale = self.BUTTON_SIZE
@@ -217,7 +212,6 @@ class MenuApp:
                 if event.type == pygame.QUIT:
                     running = False
 
-    # Tema
     def theme_menu(self):
         running = True
         while running:
