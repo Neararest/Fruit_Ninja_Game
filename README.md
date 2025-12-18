@@ -27,7 +27,7 @@ Semua dependency di-install lewat `requirements.txt`.
 1. Clone repository ini:
    git clone https://github.com/Neararest/Fruit_Ninja_Game.git
 
-2. Pindah ke folder Fruit_Ninja_Game
+2. Pindah folder:
    cd Fruit_Ninja_Game
 
 3. Install dependency:
