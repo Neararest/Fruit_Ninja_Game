@@ -429,7 +429,7 @@ class SoloFruitNinjaGame:
 
         if self.is_new_highscore:
             badge_font = FontCache.get_ui_font(18, bold=True)
-            badge = badge_font.render("★ REKOR BARU TERCAPAI! ★", True, (110, 255, 150))
+            badge = badge_font.render("REKOR BARU TERCAPAI!", True, (110, 255, 150))
             self.screen.blit(badge, badge.get_rect(center=(cx, card_rect.top + 88)))
 
         info_font = FontCache.get_ui_font(22, bold=True)

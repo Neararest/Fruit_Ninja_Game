@@ -918,7 +918,7 @@ class MenuApp:
                 thumb = self.theme_thumbs[name]
                 self.screen.blit(thumb, (cur_x + (card_w - 245) // 2, y_card + 14))
 
-                btn_txt = "AKTIF ✓" if is_selected else self.theme_labels.get(name, name)
+                btn_txt = "AKTIF" if is_selected else self.theme_labels.get(name, name)
                 btn_scheme = "success" if is_selected else "primary"
                 btn_rect = pygame.Rect(cur_x + 20, c_rect.bottom - 68, card_w - 40, 48)
 

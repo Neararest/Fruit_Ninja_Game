@@ -486,11 +486,11 @@ class MultiFruitNinjaGame:
         self.screen.blit(header, header.get_rect(center=(cx, card_rect.top + 48)))
 
         if self.player1 > self.player2:
-            win_str = f"🏆 PEMENANG: {self.p1_name.upper()}!"
+            win_str = f"PEMENANG: {self.p1_name.upper()}!"
         elif self.player2 > self.player1:
-            win_str = f"🏆 PEMENANG: {self.p2_name.upper()}!"
+            win_str = f"PEMENANG: {self.p2_name.upper()}!"
         else:
-            win_str = "🤝 PERTANDINGAN SERI!"
+            win_str = "PERTANDINGAN SERI!"
 
         win_font = FontCache.get_ui_font(22, bold=True)
         win_surf = win_font.render(win_str, True, (110, 255, 150))
