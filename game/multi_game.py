@@ -1,55 +1,81 @@
-import cv2
-import pygame
-import numpy as np
 import time
-from core.fruit import FruitManager
+import pygame
+from core.fruit import (
+    FruitManager,
+    JuiceParticle,
+    FloatingText,
+    segment_intersects_rect,
+)
 from core.sound_manager import SoundManager
 from core.hand_tracker import HandTracker
-from core.dataexcel import GameDataSaver
+from core.settings import SettingsManager
+from core.database import DatabaseManager
+from ui.components import (
+    FontCache,
+    ModernButtonManager,
+    HandCursorManager,
+    draw_glass_panel,
+)
+
 
 class MultiFruitNinjaGame:
-    def __init__(self, background_path="assets/themes/2.png"):
-        pygame.init()
-        pygame.mixer.init()
-        self.WIDTH, self.HEIGHT = 1280, 720  
+    def __init__(
+        self,
+        background_path="assets/themes/2.png",
+        screen=None,
+        settings=None,
+        sounds=None,
+        hand_tracker=None,
+        db=None,
+        current_user=None,
+        p2_name="Ninja 2",
+    ):
+        if not pygame.get_init():
+            pygame.init()
 
-        self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT), pygame.RESIZABLE)
-        pygame.display.set_caption("Ninja Fruits - Multiplayer")
-        
-        self.cap = cv2.VideoCapture(0)
-        self.cap.set(3, self.WIDTH)
-        self.cap.set(4, self.HEIGHT)
-        
-        self.background_path = background_path 
-        bg_img = cv2.imread(background_path)
-        self.background = cv2.resize(bg_img, (self.WIDTH, self.HEIGHT)) if bg_img is not None else \
-            255 * np.ones((self.HEIGHT, self.WIDTH, 3), dtype=np.uint8)
-        
-        self.sounds = SoundManager(["assets/sounds", "ninja_fruit_sounds"])
-        self.sounds.load("slash", "slash.mp3")
-        self.sounds.load("boom", "boom.mp3")
-        self.sounds.load("levelup", "levelup.mp3")
-        
-        self.FONT = "assets/font/Gang_of_Three_Regular.ttf"
-        
-        self.hand_tracker = HandTracker(max_hands=2)
+        self.WIDTH, self.HEIGHT = 1280, 720
+        self.owns_resources = hand_tracker is None
+
+        if screen is not None:
+            self.screen = screen
+            self.WIDTH, self.HEIGHT = self.screen.get_size()
+        else:
+            self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT), pygame.RESIZABLE)
+        pygame.display.set_caption("Fruit Ninja - Duel Multiplayer")
+
+        self.settings = settings if settings is not None else SettingsManager()
+        self.sounds = sounds if sounds is not None else SoundManager(settings=self.settings)
+        self.db = db if db is not None else DatabaseManager()
+        self.current_user = current_user if current_user is not None else {"id": None, "username": "Ninja 1", "is_guest": True}
+
+        self.p1_name = self.current_user.get("username", "Ninja 1")
+        if self.p1_name in ("Guest", "Tamu", ""):
+            self.p1_name = "Ninja 1"
+        self.p2_name = p2_name.strip() if p2_name and p2_name.strip() else "Ninja 2"
+
+        self.hand_tracker = hand_tracker if hand_tracker is not None else HandTracker(max_hands=2)
+        self.hand_tracker.set_max_hands(2)
+        self.hand_tracker.ensure_camera(self.WIDTH, self.HEIGHT)
+
+        self.background_path = background_path
+        self._load_background()
+
         self.fruit_manager = FruitManager(self.WIDTH, self.HEIGHT)
         self.clock = pygame.time.Clock()
+        self.btn_mgr = ModernButtonManager()
+        self.hand_cursor = HandCursorManager(dwell_time=self.settings.dwell_time)
 
-        self.card_img = pygame.image.load("assets/images2/card.png")
-        self.btn1_img = pygame.image.load("assets/images2/1.png")
-        self.btn2_img = pygame.image.load("assets/images2/2.png")
-        self.btn3_img = pygame.image.load("assets/images2/6.png")
-
-        self.card_img = pygame.transform.scale(self.card_img, (350, 350))
-        self.btn1_img = pygame.transform.scale(self.btn1_img, (90, 90))
-        self.btn2_img = pygame.transform.scale(self.btn2_img, (90, 90))
-        self.btn3_img = pygame.transform.scale(self.btn3_img, (90, 90))
-        self.data_saver = GameDataSaver()
-        self.save_message = None
-        self.save_message_time = 0
         self.reset_game()
-        self.start_time = time.time()
+
+    def _load_background(self):
+        try:
+            raw_bg = pygame.image.load(self.background_path).convert()
+            self.background_raw = raw_bg
+            self.background = pygame.transform.smoothscale(raw_bg, (self.WIDTH, self.HEIGHT))
+        except Exception:
+            self.background_raw = None
+            self.background = pygame.Surface((self.WIDTH, self.HEIGHT))
+            self.background.fill((36, 22, 14))
 
     def reset_game(self):
         self.player1 = 0
@@ -60,301 +86,556 @@ class MultiFruitNinjaGame:
         self.p2_prev = None
         self.p1_buf = []
         self.p2_buf = []
+        self.p1_trail = []
+        self.p2_trail = []
         self.level = 1
-        self.fruits = [self.fruit_manager.spawn_fruit_multi(1, True, True) for _ in range(7)]
-        self.last_death_time = None
-        self.game_over = False
-        self.show_go_screen = False      
-        self.go_start_ticks = 0          
-        self.GO_DURATION = 2000
 
-    def _overlay_image(self, bg, fg, x, y):
-        h, w = fg.shape[:2]
-        if len(fg.shape) == 3 and fg.shape[2] == 3:
-            fg = np.dstack((fg, np.ones((h, w), dtype=np.uint8) * 255))
-        if x < 0 or y < 0 or x + w > self.WIDTH or y + h > self.HEIGHT:
-            return bg
-        alpha = fg[:, :, 3] / 255.0
-        for c in range(3):
-            bg[y:y+h, x:x+w, c] = (alpha * fg[:, :, c] + (1 - alpha) * bg[y:y+h, x:x+w, c]).astype(np.uint8)
-        return bg
+        self.fruits = [self.fruit_manager.spawn_fruit_multi(1, True, True) for _ in range(6)]
+        self.sliced_halves = []
+        self.particles = []
+        self.floating_texts = []
+
+        self.paused = False
+        self.game_over = False
+        self.show_go_screen = False
+        self.go_start_ticks = 0
+        self.GO_DURATION = 1400
+        self.db_saved_for_round = False
 
     def _update_size(self):
         new_w, new_h = self.screen.get_size()
         if new_w != self.WIDTH or new_h != self.HEIGHT:
             self.WIDTH, self.HEIGHT = new_w, new_h
-            bg_img = cv2.imread(self.background_path)
-            self.background = cv2.resize(bg_img, (self.WIDTH, self.HEIGHT)) if bg_img is not None else \
-                255 * np.ones((self.HEIGHT, self.WIDTH, 3), dtype=np.uint8)
+            if self.background_raw is not None:
+                self.background = pygame.transform.smoothscale(self.background_raw, (self.WIDTH, self.HEIGHT))
+            else:
+                self.background = pygame.Surface((self.WIDTH, self.HEIGHT))
+                self.background.fill((36, 22, 14))
             self.fruit_manager.WIDTH = self.WIDTH
             self.fruit_manager.HEIGHT = self.HEIGHT
 
     def _assign_hands(self, result, cam_w, cam_h):
         p1_hand = None
         p2_hand = None
-        
-        scale_x = self.WIDTH / cam_w
-        scale_y = self.HEIGHT / cam_h
-        
+        any_hand = None
+
         if result.multi_hand_landmarks:
-            for hand_landmark in result.multi_hand_landmarks:
-                lx = int(hand_landmark.landmark[8].x * cam_w)
-                ly = int(hand_landmark.landmark[8].y * cam_h)
-                gx = int(lx * scale_x)
-                gy = int(ly * scale_y)
-                
+            for hand_lms in result.multi_hand_landmarks:
+                gx, gy = self.hand_tracker.extract_finger_point(
+                    hand_lms,
+                    cam_w,
+                    cam_h,
+                    self.WIDTH,
+                    self.HEIGHT,
+                    finger_mode=self.settings.finger_mode,
+                )
+                if any_hand is None:
+                    any_hand = (gx, gy)
+
+                if not self.hand_tracker.is_finger_active(
+                    hand_lms,
+                    finger_mode=self.settings.finger_mode,
+                    require_raised=(not self.game_over and not self.paused),
+                ):
+                    continue
+
                 if gx < self.WIDTH // 2:
                     if self.p1_alive:
                         p1_hand = (gx, gy)
                 else:
                     if self.p2_alive:
                         p2_hand = (gx, gy)
-        
-        return p1_hand, p2_hand
 
-    def _smooth_hand(self, hand_pos, buf, prev_pos):
+        return p1_hand, p2_hand, any_hand
+
+    @staticmethod
+    def _smooth_hand(hand_pos, buf, prev_pos):
         if hand_pos is None:
+            buf.clear()
             return None
-        
         x, y = hand_pos
         buf.append((x, y))
-        if len(buf) > 5:
+        if len(buf) > 4:
             buf.pop(0)
-        
-        sx = int(sum(px for px, py in buf) / len(buf))
-        sy = int(sum(py for px, py in buf) / len(buf))
-        
+        sx = sum(px for px, _ in buf) / len(buf)
+        sy = sum(py for _, py in buf) / len(buf)
         if prev_pos is not None:
             sx = int(prev_pos[0] * 0.45 + sx * 0.55)
             sy = int(prev_pos[1] * 0.45 + sy * 0.55)
-        
+        else:
+            sx, sy = int(sx), int(sy)
         return (sx, sy)
 
-    def _draw_pointer(self, frame, pos, color_outer, color_inner):
-        if pos is None:
-            return frame
-        x, y = pos
-        cv2.circle(frame, (x, y), 18, color_outer, -1)
-        cv2.circle(frame, (x, y), 9, color_inner, -1)
-        return frame
+    def _draw_trail(self, trail, now: float, outer_col, inner_col):
+        trail[:] = [p for p in trail if now - p[2] < 0.22]
+        if len(trail) < 2:
+            return
+        n = len(trail)
+        for i in range(1, n):
+            x1, y1, _ = trail[i - 1]
+            x2, y2, _ = trail[i]
+            ratio = i / n
+            thickness = max(2, int(13 * ratio))
+            pygame.draw.line(self.screen, outer_col, (x1, y1), (x2, y2), thickness + 4)
+            pygame.draw.line(self.screen, inner_col, (x1, y1), (x2, y2), max(1, thickness - 2))
+        lx, ly, _ = trail[-1]
+        pygame.draw.circle(self.screen, outer_col, (lx, ly), 12)
+        pygame.draw.circle(self.screen, inner_col, (lx, ly), 6)
 
-    def _handle_hands_and_slice(self, cam_frame, frame, now):
+    def _trigger_game_over(self):
+        if self.game_over:
+            return
+        self.game_over = True
+        self.paused = False
+        self.show_go_screen = True
+        self.go_start_ticks = pygame.time.get_ticks()
+        if not self.db_saved_for_round:
+            self.db.save_multi_score(
+                self.current_user,
+                p1_score=self.player1,
+                p2_score=self.player2,
+                level=self.level,
+                p2_name=self.p2_name,
+            )
+            self.db_saved_for_round = True
+
+    def _spawn_slice_effects(self, fruit, label_text="+1", label_col=(255, 240, 100)):
+        cx = fruit.x + fruit.width / 2
+        cy = fruit.y + fruit.height / 2
+        if not fruit.is_bomb:
+            self.sliced_halves.extend(self.fruit_manager.split_fruit_surface(fruit))
+            for _ in range(10):
+                self.particles.append(JuiceParticle(cx, cy, fruit.color))
+            self.floating_texts.append(FloatingText(label_text, cx, cy - 10, color=label_col, size=26))
+        else:
+            for _ in range(22):
+                self.particles.append(JuiceParticle(cx, cy, (255, 70, 20)))
+            self.floating_texts.append(FloatingText("GUGUR!", cx, cy, color=(255, 65, 65), size=32))
+
+    def _handle_hands_and_slice(self, cam_frame, now: float):
         result = self.hand_tracker.process(cam_frame)
         cam_h, cam_w = cam_frame.shape[:2]
-        
-        p1_hand, p2_hand = self._assign_hands(result, cam_w, cam_h)
-        
-        # Smooth and draw P1 
-        if self.p1_alive and p1_hand is not None:
-            smooth_p1 = self._smooth_hand(p1_hand, self.p1_buf, self.p1_prev)
-            if smooth_p1:
-                frame = self._draw_pointer(frame, smooth_p1, (0, 255, 255), (0, 180, 255))
-                self.p1_prev = smooth_p1
-        
-        # Smooth and draw P2   
-        if self.p2_alive and p2_hand is not None:
-            smooth_p2 = self._smooth_hand(p2_hand, self.p2_buf, self.p2_prev)
-            if smooth_p2:
-                frame = self._draw_pointer(frame, smooth_p2, (0, 200, 255), (0, 120, 255))
-                self.p2_prev = smooth_p2
-        
-        # Slice detection
+        p1_raw, p2_raw, any_hand = self._assign_hands(result, cam_w, cam_h)
+
+        self.hand_cursor.update_pointer(any_hand, dwell_time=self.settings.dwell_time)
+        if self.game_over or self.paused:
+            return
+
+        smooth_p1 = self._smooth_hand(p1_raw, self.p1_buf, self.p1_prev) if self.p1_alive else None
+        smooth_p2 = self._smooth_hand(p2_raw, self.p2_buf, self.p2_prev) if self.p2_alive else None
+
+        p1_start = self.p1_prev if self.p1_prev is not None else smooth_p1
+        p2_start = self.p2_prev if self.p2_prev is not None else smooth_p2
+
+        if smooth_p1:
+            self.p1_trail.append((smooth_p1[0], smooth_p1[1], now))
+        else:
+            self.p1_trail.clear()
+
+        if smooth_p2:
+            self.p2_trail.append((smooth_p2[0], smooth_p2[1], now))
+        else:
+            self.p2_trail.clear()
+
         for fruit in self.fruits:
-            if not fruit.alive or fruit.cut:
+            if not fruit.is_Targetable:
                 continue
-            
-            fx, fy = fruit.x, fruit.y
-            fh, fw = fruit.img.shape[:2]
-            
-            if self.p1_alive and self.p1_prev is not None:
-                px, py = self.p1_prev
-                if fx < px < fx + fw and fy < py < fy + fh:
+
+            if self.p1_alive and smooth_p1 is not None and p1_start is not None:
+                if segment_intersects_rect(p1_start, smooth_p1, fruit.rect):
                     fruit.cut = True
                     if fruit.is_bomb and not self.game_over:
                         self.p1_alive = False
                         self.sounds.play("boom")
-
+                        self._spawn_slice_effects(fruit)
                         if not self.p2_alive:
-                            self.game_over = True
-                            self.show_go_screen = True
-                            self.go_start_ticks = pygame.time.get_ticks()
-                            self.last_death_time = now
+                            self._trigger_game_over()
                     else:
                         self.player1 += 1
                         self.sounds.play("slash")
+                        self._spawn_slice_effects(fruit, "+1", (110, 235, 255))
                         if (self.player1 + self.player2) % 30 == 0:
                             self.level += 1
                             self.sounds.play("levelup")
-            
-            if self.p2_alive and self.p2_prev is not None and not fruit.cut:
-                px, py = self.p2_prev
-                if fx < px < fx + fw and fy < py < fy + fh:
+
+            if self.p2_alive and smooth_p2 is not None and p2_start is not None and not fruit.cut:
+                if segment_intersects_rect(p2_start, smooth_p2, fruit.rect):
                     fruit.cut = True
                     if fruit.is_bomb and not self.game_over:
                         self.p2_alive = False
                         self.sounds.play("boom")
-
+                        self._spawn_slice_effects(fruit)
                         if not self.p1_alive:
-                            self.game_over = True
-                            self.show_go_screen = True
-                            self.go_start_ticks = pygame.time.get_ticks()
-                            self.last_death_time = now
+                            self._trigger_game_over()
                     else:
                         self.player2 += 1
                         self.sounds.play("slash")
+                        self._spawn_slice_effects(fruit, "+1", (255, 200, 80))
                         if (self.player1 + self.player2) % 30 == 0:
                             self.level += 1
                             self.sounds.play("levelup")
-        
-        return frame
 
-    def _update_fruits(self):
-        for fruit in self.fruits:
-            if fruit.alive:
-                fruit.y += fruit.vy
-                if fruit.y > self.HEIGHT + 50:
-                    fruit.alive = False
-        
-        # Respawn fruits 
-        target_count = min(7 + self.level // 1, 18)
-        while len(self.fruits) < target_count:
-            self.fruits.append(self.fruit_manager.spawn_fruit_multi(self.level, self.p1_alive, self.p2_alive))
-        
-        # Replace dead/cut fruits
-        for i, fruit in enumerate(self.fruits):
-            if not fruit.alive or fruit.cut:
-                self.fruits[i] = self.fruit_manager.spawn_fruit_multi(self.level, self.p1_alive, self.p2_alive)
+        self.p1_prev = smooth_p1
+        self.p2_prev = smooth_p2
 
-    def _setup_gameover_ui(self):
-        cx = self.WIDTH // 2
-        cy = self.HEIGHT // 2
+    def _update_fruits_and_effects(self):
+        if not self.game_over and not self.paused:
+            for fruit in self.fruits:
+                fruit.update(self.WIDTH, self.HEIGHT)
 
-        self.card_rect = self.card_img.get_rect(center=(cx, cy - 80))
+            target_count = min(6 + self.level, 14)
+            while len(self.fruits) < target_count:
+                self.fruits.append(self.fruit_manager.spawn_fruit_multi(self.level, self.p1_alive, self.p2_alive))
 
-        y = cy + 165
-        self.btn1_rect = self.btn1_img.get_rect(center=(cx - 150, y))
-        self.btn2_rect = self.btn2_img.get_rect(center=(cx, y))
-        self.btn3_rect = self.btn3_img.get_rect(center=(cx + 150, y))
+            for i, fruit in enumerate(self.fruits):
+                if not fruit.alive or fruit.cut:
+                    self.fruits[i] = self.fruit_manager.spawn_fruit_multi(self.level, self.p1_alive, self.p2_alive)
+
+        if not self.paused:
+            for half in self.sliced_halves:
+                half.update(self.HEIGHT)
+            self.sliced_halves = [h for h in self.sliced_halves if h.alive]
+
+            for pt in self.particles:
+                pt.update()
+            self.particles = [p for p in self.particles if p.alive]
+
+            for ft in self.floating_texts:
+                ft.update()
+            self.floating_texts = [f for f in self.floating_texts if f.alive]
+
+    def _draw_hud(self, cam_frame, mouse_clicked: bool):
+        mid_x = self.WIDTH // 2
+        pygame.draw.line(self.screen, (215, 165, 75), (mid_x, 0), (mid_x, self.HEIGHT), 3)
+
+        font_title = FontCache.get_title_font(28)
+        font_sub = FontCache.get_ui_font(16, bold=True)
+
+        # Panel P1 (Kiri)
+        p1_rect = pygame.Rect(20, 18, 250, 84)
+        draw_glass_panel(self.screen, p1_rect, border_radius=16)
+        p1_s = font_title.render(f"{self.p1_name}: {self.player1}", True, (255, 220, 85))
+        self.screen.blit(p1_s, (p1_rect.x + 16, p1_rect.y + 10))
+        st1 = "AKTIF" if self.p1_alive else "GUGUR"
+        col1 = (115, 245, 145) if self.p1_alive else (255, 95, 90)
+        self.screen.blit(font_sub.render(f"Status: {st1}", True, col1), (p1_rect.x + 16, p1_rect.y + 48))
+
+        # Panel P2 (Kanan, di sebelah kiri tombol Pause)
+        p2_rect = pygame.Rect(self.WIDTH - 340, 18, 250, 84)
+        draw_glass_panel(self.screen, p2_rect, border_radius=16)
+        p2_s = font_title.render(f"{self.p2_name}: {self.player2}", True, (255, 200, 85))
+        self.screen.blit(p2_s, (p2_rect.x + 16, p2_rect.y + 10))
+        st2 = "AKTIF" if self.p2_alive else "GUGUR"
+        col2 = (115, 245, 145) if self.p2_alive else (255, 95, 90)
+        self.screen.blit(font_sub.render(f"Status: {st2}", True, col2), (p2_rect.x + 16, p2_rect.y + 48))
+
+        # Tombol Ikon Pause (Pojok Kanan Atas)
+        pause_rect = pygame.Rect(self.WIDTH - 74, 22, 54, 54)
+        if self.btn_mgr.draw_icon_button(
+            self.screen,
+            "multi_hud_pause",
+            "pause",
+            pause_rect,
+            scheme="dark",
+            tooltip="Jeda",
+            hand_cursor=self.hand_cursor,
+            mouse_clicked_event=mouse_clicked,
+        ):
+            self.paused = True
+            self.p1_trail.clear()
+            self.p2_trail.clear()
+
+        # Badge Level Tengah
+        lvl_rect = pygame.Rect(0, 0, 150, 44)
+        lvl_rect.midtop = (mid_x, 18)
+        draw_glass_panel(self.screen, lvl_rect, border_radius=14)
+        lvl_txt = font_sub.render(f"LEVEL {self.level}", True, (255, 235, 175))
+        self.screen.blit(lvl_txt, lvl_txt.get_rect(center=lvl_rect.center))
+
+        if self.settings.show_webcam_pip and cam_frame is not None:
+            pip_w, pip_h = 195, 128
+            pip_surf = self.hand_tracker.frame_to_pip_surface(cam_frame, (pip_w, pip_h))
+            pip_rect = pygame.Rect(mid_x - pip_w // 2, self.HEIGHT - pip_h - 16, pip_w, pip_h)
+            draw_glass_panel(self.screen, pip_rect.inflate(8, 8), border_radius=12, shadow=False)
+            self.screen.blit(pip_surf, pip_rect.topleft)
+
+    def _draw_pause_modal(self, mouse_clicked: bool) -> str | None:
+        overlay = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
+        overlay.fill((12, 8, 5, 185))
+        self.screen.blit(overlay, (0, 0))
+
+        cx, cy = self.WIDTH // 2, self.HEIGHT // 2
+        card_rect = pygame.Rect(0, 0, 500, 430)
+        card_rect.center = (cx, cy)
+        draw_glass_panel(self.screen, card_rect, border_radius=24)
+
+        title_font = FontCache.get_title_font(44)
+        header = title_font.render("PERMAINAN DIJEDA", True, (255, 215, 75))
+        self.screen.blit(header, header.get_rect(center=(cx, card_rect.top + 48)))
+
+        lbl_font = FontCache.get_ui_font(20, bold=True)
+
+        r1_y = card_rect.top + 105
+        self.screen.blit(lbl_font.render("Musik Latar", True, (245, 230, 205)), (card_rect.left + 45, r1_y + 6))
+        if self.btn_mgr.draw_toggle_switch(
+            self.screen,
+            "mp_pause_bgm",
+            self.settings.bgm_enabled,
+            pygame.Rect(card_rect.right - 135, r1_y, 90, 40),
+            hand_cursor=self.hand_cursor,
+            mouse_clicked_event=mouse_clicked,
+        ):
+            self.settings.bgm_enabled = not self.settings.bgm_enabled
+            self.sounds.sync_with_settings()
+
+        r2_y = card_rect.top + 160
+        self.screen.blit(lbl_font.render("Efek Suara", True, (245, 230, 205)), (card_rect.left + 45, r2_y + 6))
+        if self.btn_mgr.draw_toggle_switch(
+            self.screen,
+            "mp_pause_sfx",
+            self.settings.sfx_enabled,
+            pygame.Rect(card_rect.right - 135, r2_y, 90, 40),
+            hand_cursor=self.hand_cursor,
+            mouse_clicked_event=mouse_clicked,
+        ):
+            self.settings.sfx_enabled = not self.settings.sfx_enabled
+            self.sounds.sync_with_settings()
+
+        r3_y = card_rect.top + 215
+        self.screen.blit(lbl_font.render("Gesture Jari", True, (245, 230, 205)), (card_rect.left + 45, r3_y + 8))
+        if self.btn_mgr.draw_button(
+            self.screen,
+            "mp_pause_finger",
+            f"<  {self.settings.get_finger_label()}  >",
+            pygame.Rect(card_rect.right - 225, r3_y, 180, 42),
+            scheme="info",
+            font_size=18,
+            hand_cursor=self.hand_cursor,
+            mouse_clicked_event=mouse_clicked,
+            border_radius=12,
+        ):
+            self.settings.cycle_finger_mode(1)
+
+        btn_y = card_rect.top + 290
+        if self.btn_mgr.draw_button(
+            self.screen,
+            "mp_pause_resume",
+            "Lanjutkan Bermain",
+            pygame.Rect(cx - 205, btn_y, 410, 52),
+            scheme="primary",
+            icon="play",
+            font_size=21,
+            hand_cursor=self.hand_cursor,
+            mouse_clicked_event=mouse_clicked,
+        ):
+            self.paused = False
+            return None
+
+        btn_y2 = btn_y + 64
+        if self.btn_mgr.draw_button(
+            self.screen,
+            "mp_pause_restart",
+            "Ulangi",
+            pygame.Rect(cx - 205, btn_y2, 198, 48),
+            scheme="success",
+            icon="replay",
+            font_size=19,
+            hand_cursor=self.hand_cursor,
+            mouse_clicked_event=mouse_clicked,
+        ):
+            self.reset_game()
+            return None
+
+        if self.btn_mgr.draw_button(
+            self.screen,
+            "mp_pause_menu",
+            "Menu Utama",
+            pygame.Rect(cx + 7, btn_y2, 198, 48),
+            scheme="dark",
+            icon="back",
+            font_size=19,
+            hand_cursor=self.hand_cursor,
+            mouse_clicked_event=mouse_clicked,
+        ):
+            return "menu"
+
+        return None
+
+    def _draw_gameover_modal(self, mouse_clicked: bool) -> str | None:
+        overlay = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
+        overlay.fill((12, 8, 5, 190))
+        self.screen.blit(overlay, (0, 0))
+
+        elapsed = pygame.time.get_ticks() - self.go_start_ticks
+        if self.show_go_screen and elapsed < self.GO_DURATION:
+            font_go = FontCache.get_title_font(92)
+            go_text = font_go.render("GAME OVER", True, (240, 60, 55))
+            go_rect = go_text.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 2))
+            self.screen.blit(go_text, go_rect)
+            return None
+
+        self.show_go_screen = False
+        cx, cy = self.WIDTH // 2, self.HEIGHT // 2
+
+        card_rect = pygame.Rect(0, 0, 520, 395)
+        card_rect.center = (cx, cy)
+        draw_glass_panel(self.screen, card_rect, border_radius=24)
+
+        title_font = FontCache.get_title_font(44)
+        header = title_font.render("HASIL PERTANDINGAN", True, (255, 215, 75))
+        self.screen.blit(header, header.get_rect(center=(cx, card_rect.top + 48)))
+
+        if self.player1 > self.player2:
+            win_str = f"🏆 PEMENANG: {self.p1_name.upper()}!"
+        elif self.player2 > self.player1:
+            win_str = f"🏆 PEMENANG: {self.p2_name.upper()}!"
+        else:
+            win_str = "🤝 PERTANDINGAN SERI!"
+
+        win_font = FontCache.get_ui_font(22, bold=True)
+        win_surf = win_font.render(win_str, True, (110, 255, 150))
+        self.screen.blit(win_surf, win_surf.get_rect(center=(cx, card_rect.top + 96)))
+
+        info_font = FontCache.get_ui_font(22, bold=True)
+        rows = [
+            (f"Skor {self.p1_name}", str(self.player1)),
+            (f"Skor {self.p2_name}", str(self.player2)),
+            ("Level Tercapai", f"Level {self.level}"),
+        ]
+        start_y = card_rect.top + 145
+        for i, (label, val) in enumerate(rows):
+            y_pos = start_y + i * 42
+            lbl_s = info_font.render(label, True, (215, 190, 155))
+            val_s = info_font.render(val, True, (255, 250, 240))
+            self.screen.blit(lbl_s, (card_rect.left + 55, y_pos))
+            self.screen.blit(val_s, val_s.get_rect(topright=(card_rect.right - 55, y_pos)))
+
+        btn_y = card_rect.bottom - 72
+        btn_w, btn_h = 144, 50
+        gap = 14
+
+        menu_rect = pygame.Rect(cx - btn_w - gap - btn_w // 2, btn_y, btn_w, btn_h)
+        replay_rect = pygame.Rect(cx - btn_w // 2, btn_y, btn_w, btn_h)
+        lb_rect = pygame.Rect(cx + btn_w // 2 + gap, btn_y, btn_w, btn_h)
+
+        if self.btn_mgr.draw_button(
+            self.screen,
+            "go_multi_menu",
+            "Menu",
+            menu_rect,
+            scheme="dark",
+            icon="back",
+            font_size=19,
+            hand_cursor=self.hand_cursor,
+            mouse_clicked_event=mouse_clicked,
+        ):
+            return "menu"
+
+        if self.btn_mgr.draw_button(
+            self.screen,
+            "go_multi_replay",
+            "Main Lagi",
+            replay_rect,
+            scheme="primary",
+            icon="replay",
+            font_size=19,
+            hand_cursor=self.hand_cursor,
+            mouse_clicked_event=mouse_clicked,
+        ):
+            self.reset_game()
+            return None
+
+        if self.btn_mgr.draw_button(
+            self.screen,
+            "go_multi_lb",
+            "Peringkat",
+            lb_rect,
+            scheme="info",
+            icon="trophy",
+            font_size=19,
+            hand_cursor=self.hand_cursor,
+            mouse_clicked_event=mouse_clicked,
+        ):
+            return "leaderboard"
+
+        return None
 
     def run(self):
         running = True
+        font_float = FontCache.get_ui_font(26, bold=True)
+
         while running:
-            success, cam = self.cap.read()
-            if not success:
-                time.sleep(0.05)
-                continue
-            cam = cv2.flip(cam, 1)
-
-            self._update_size()
-            frame = self.background.copy()
-            now = time.time()
-
-            frame = self._handle_hands_and_slice(cam, frame, now)
-            self._update_fruits()
-            
-            for fruit in self.fruits:
-                if fruit.alive:
-                    frame = self._overlay_image(frame, fruit.img, int(fruit.x), int(fruit.y))
-            
-            if not self.game_over:
-                cv2.putText(frame, f"Player1: {self.player1}", (30, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0,255,255), 3)
-                cv2.putText(frame, f"Player2: {self.player2}", (30, 120),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0,200,255), 3)
-                cv2.putText(frame, f"Level: {self.level}", (30, 180),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,255,255), 2)
-                
-                cv2.line(frame, (self.WIDTH//2, 0), (self.WIDTH//2, self.HEIGHT), (30,30,30), 2)
-            
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            surface = pygame.surfarray.make_surface(frame_rgb.swapaxes(0, 1))
-            self.screen.blit(surface, (0, 0))
-
-            # Game Over
-            if self.game_over:
-                # overlay gelap
-                overlay = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
-                overlay.fill((0, 0, 0, 160))
-                self.screen.blit(overlay, (0, 0))
-
-                elapsed = pygame.time.get_ticks() - self.go_start_ticks
-
-                if self.show_go_screen and elapsed < self.GO_DURATION:
-                    font_go = pygame.font.Font(self.FONT, 96)
-                    go_text = font_go.render("GAME OVER", True, (255, 60, 60))
-                    go_rect = go_text.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 2))
-                    self.screen.blit(go_text, go_rect)
-                else:
-                    if self.show_go_screen:          # baru pertama kali masuk fase 2
-                        self._setup_gameover_ui()
-                    self.show_go_screen = False
-
-                    self.screen.blit(self.card_img, self.card_rect)
-
-                    font_score = pygame.font.Font(self.FONT, 36)
-
-                    p1_text = font_score.render(f"P1 : {self.player1}", True, (0, 0, 0))
-                    p2_text = font_score.render(f"P2 : {self.player2}", True, (0, 0, 0))
-                    level_text = font_score.render(f"LEVEL : {self.level}", True, (0, 0, 0))
-
-                    gap = 35
-
-                    p1_rect = p1_text.get_rect(center=(self.card_rect.centerx, self.card_rect.centery - gap))
-                    p2_rect = p2_text.get_rect(center=(self.card_rect.centerx, self.card_rect.centery))
-                    level_rect = level_text.get_rect(center=(self.card_rect.centerx, self.card_rect.centery + gap))
-
-                    self.screen.blit(p1_text, p1_rect)
-                    self.screen.blit(p2_text, p2_rect)
-                    self.screen.blit(level_text, level_rect)
-
-                    self.screen.blit(self.btn1_img, self.btn1_rect)
-                    self.screen.blit(self.btn2_img, self.btn2_rect)
-                    self.screen.blit(self.btn3_img, self.btn3_rect)
-
-            if self.save_message:
-                if time.time() - self.save_message_time < 2.5:
-                    font = pygame.font.Font(self.FONT, 28)
-                    text = font.render(self.save_message, True, (0, 255, 0))
-                    text_rect = text.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 2 + 265))
-                    self.screen.blit(text, text_rect)
-                else:
-                    self.save_message = None
-
-            pygame.display.flip()
-            self.clock.tick(20)
-
+            mouse_clicked = False
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self._cleanup()
                     return "exit"
-
                 if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        self._cleanup()
-                        return "menu"
+                    if event.key in (pygame.K_ESCAPE, pygame.K_p):
+                        if not self.game_over:
+                            self.paused = not self.paused
+                            self.p1_trail.clear()
+                            self.p2_trail.clear()
+                        else:
+                            self._cleanup()
+                            return "menu"
                     if self.game_over and event.key == pygame.K_r:
                         self.reset_game()
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mouse_clicked = True
 
-                if event.type == pygame.MOUSEBUTTONDOWN and self.game_over:
-                    mx, my = event.pos
-                    if self.btn1_rect.collidepoint(mx, my):
-                        self._cleanup()
-                        return "menu" 
-                    elif self.btn2_rect.collidepoint(mx, my):
-                        self.reset_game()
-                    elif self.btn3_rect.collidepoint(mx, my):
-                        self.data_saver.save_multiplayer(
-                            player1=self.player1,
-                            player2=self.player2,
-                            level=self.level
-                        )
-                        self.save_message = "Data multiplayer berhasil disimpan"
-                        self.save_message_time = time.time()
+            self._update_size()
+            now = time.time()
+
+            ok, cam_frame = self.hand_tracker.read_frame()
+            self.screen.blit(self.background, (0, 0))
+
+            if ok and cam_frame is not None:
+                self._handle_hands_and_slice(cam_frame, now)
+            else:
+                self.hand_cursor.update_pointer(None)
+
+            self._update_fruits_and_effects()
+
+            for fruit in self.fruits:
+                fruit.draw(self.screen)
+
+            for half in self.sliced_halves:
+                half.draw(self.screen)
+
+            for pt in self.particles:
+                pt.draw(self.screen)
+
+            for ft in self.floating_texts:
+                ft.draw(self.screen, font_float)
+
+            if not self.game_over and not self.paused:
+                self._draw_trail(self.p1_trail, now, (0, 195, 255), (210, 250, 255))
+                self._draw_trail(self.p2_trail, now, (240, 125, 20), (255, 245, 190))
+                self._draw_hud(cam_frame, mouse_clicked)
+            elif self.paused:
+                self._draw_hud(cam_frame, False)
+                action = self._draw_pause_modal(mouse_clicked)
+                if action in ("menu", "exit"):
+                    self._cleanup()
+                    return action
+                self.hand_cursor.draw_cursor(self.screen)
+            else:
+                action = self._draw_gameover_modal(mouse_clicked)
+                if action in ("menu", "leaderboard", "exit"):
+                    self._cleanup()
+                    return action
+                self.hand_cursor.draw_cursor(self.screen)
+
+            pygame.display.flip()
+            self.clock.tick(38)
 
         self._cleanup()
         return "menu"
 
     def _cleanup(self):
-        self.cap.release()
-        self.hand_tracker.close()
+        if self.owns_resources:
+            self.hand_tracker.close()
+        else:
+            self.hand_tracker.set_max_hands(1)
         print("Multiplayer game closed safely.")
