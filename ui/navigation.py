@@ -81,6 +81,7 @@ class MenuApp:
         self._cached_bg_size = None
         self._cached_bg_theme = None
         self.bg_scaled = None
+        self._cached_overlay = None
 
         self.current_user = None
         self.last_p2_name = "Rival"
@@ -102,13 +103,13 @@ class MenuApp:
         if self._cached_bg_size != (w, h) or self._cached_bg_theme != self.selected_theme:
             raw = self.theme_surfaces_raw.get(self.selected_theme)
             self.bg_scaled = pygame.transform.smoothscale(raw, (w, h))
+            self._cached_overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+            self._cached_overlay.fill((16, 10, 6, 85))
             self._cached_bg_size = (w, h)
             self._cached_bg_theme = self.selected_theme
 
         self.screen.blit(self.bg_scaled, (0, 0))
-        overlay = pygame.Surface((w, h), pygame.SRCALPHA)
-        overlay.fill((16, 10, 6, 85))
-        self.screen.blit(overlay, (0, 0))
+        self.screen.blit(self._cached_overlay, (0, 0))
 
     def _update_menu_hand_tracking(self):
         if not self.settings.menu_hand_tracking:
@@ -125,7 +126,7 @@ class MenuApp:
             self.WIDTH,
             self.HEIGHT,
             finger_mode=self.settings.finger_mode,
-            require_raised=False,
+            require_raised=True,
         )
         self.hand_cursor.update_pointer(pos, dwell_time=self.settings.dwell_time)
         return cam_frame
@@ -263,7 +264,7 @@ class MenuApp:
 
             self._draw_overlay_extras(cam_frame)
             pygame.display.flip()
-            self.clock.tick(38)
+            self.clock.tick(60)
 
     def main_menu(self):
         self.sounds.play_music(self.MENU_MUSIC)
@@ -452,7 +453,7 @@ class MenuApp:
 
             self._draw_overlay_extras(cam_frame)
             pygame.display.flip()
-            self.clock.tick(38)
+            self.clock.tick(60)
 
     def multi_setup_menu(self):
         """
@@ -591,7 +592,7 @@ class MenuApp:
 
             self._draw_overlay_extras(cam_frame)
             pygame.display.flip()
-            self.clock.tick(38)
+            self.clock.tick(60)
 
     def settings_menu(self):
         dwell_presets = [0.8, 1.2, 1.6]
@@ -702,7 +703,7 @@ class MenuApp:
 
             self._draw_overlay_extras(cam_frame)
             pygame.display.flip()
-            self.clock.tick(38)
+            self.clock.tick(60)
 
     def leaderboard_menu(self):
         active_tab = "solo"
@@ -877,7 +878,7 @@ class MenuApp:
 
             self._draw_overlay_extras(cam_frame)
             pygame.display.flip()
-            self.clock.tick(38)
+            self.clock.tick(60)
 
     def theme_menu(self):
         running = True
@@ -952,7 +953,7 @@ class MenuApp:
 
             self._draw_overlay_extras(cam_frame)
             pygame.display.flip()
-            self.clock.tick(38)
+            self.clock.tick(60)
 
     def _shutdown(self):
         self.hand_tracker.close()

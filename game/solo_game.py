@@ -73,12 +73,17 @@ class SoloFruitNinjaGame:
             self.background_raw = None
             self.background = pygame.Surface((self.WIDTH, self.HEIGHT))
             self.background.fill((36, 22, 14))
+        self._modal_overlay = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
+        self._modal_overlay.fill((12, 8, 5, 185))
 
     def reset_game(self):
         self.score = 0
         self.missed = 0
         self.level = 1
-        self.fruits = [self.fruit_manager.spawn_fruit_solo(1) for _ in range(4)]
+        self.streak = 0
+        self.max_streak = 0
+        self.multiplier = 1
+        self.fruits = [self.fruit_manager.spawn_fruit_solo(1) for _ in range(3)]
         self.sliced_halves = []
         self.particles = []
         self.floating_texts = []
@@ -105,6 +110,8 @@ class SoloFruitNinjaGame:
             else:
                 self.background = pygame.Surface((self.WIDTH, self.HEIGHT))
                 self.background.fill((36, 22, 14))
+            self._modal_overlay = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
+            self._modal_overlay.fill((12, 8, 5, 185))
             self.fruit_manager.WIDTH = self.WIDTH
             self.fruit_manager.HEIGHT = self.HEIGHT
 
@@ -129,46 +136,63 @@ class SoloFruitNinjaGame:
             self.personal_best = max(self.personal_best, res.get("highscore", self.score))
             self.db_saved_for_round = True
 
-    def _spawn_slice_effects(self, fruit, bonus_text=None):
+    @staticmethod
+    def _compute_multiplier(streak: int) -> tuple[int, str, tuple, tuple]:
+        """
+        Mengembalikan (multiplier, tier_label, outer_blade_color, inner_blade_color) berdasarkan streak.
+        """
+        if streak >= 20:
+            return 4, "FRENZY 4x!", (255, 210, 20), (255, 255, 220)
+        if streak >= 10:
+            return 3, "SUPER 3x!", (215, 65, 255), (250, 220, 255)
+        if streak >= 5:
+            return 2, "HOT 2x!", (0, 215, 255), (215, 252, 255)
+        return 1, "", (235, 115, 20), (255, 248, 200)
+
+    def _spawn_slice_effects(self, fruit, pts_gained: int = 1, bonus_text=None):
         cx = fruit.x + fruit.width / 2
         cy = fruit.y + fruit.height / 2
 
         if not fruit.is_bomb:
             halves = self.fruit_manager.split_fruit_surface(fruit)
             self.sliced_halves.extend(halves)
-            for _ in range(12):
+            for _ in range(10):
                 self.particles.append(JuiceParticle(cx, cy, fruit.color))
-            self.floating_texts.append(FloatingText("+1", cx, cy - 10, color=(255, 240, 115), size=26))
+            _, _, outer_col, _ = self._compute_multiplier(self.streak)
+            pt_col = (255, 240, 115) if pts_gained == 1 else outer_col
+            self.floating_texts.append(FloatingText(f"+{pts_gained}", cx, cy - 10, color=pt_col, size=26))
             if bonus_text:
-                self.floating_texts.append(FloatingText(bonus_text, cx, cy - 46, color=(110, 255, 155), size=30))
+                self.floating_texts.append(FloatingText(bonus_text, cx, cy - 46, color=(110, 255, 155), size=28))
         else:
-            for _ in range(25):
+            for _ in range(22):
                 self.particles.append(JuiceParticle(cx, cy, (255, 80, 20)))
             self.floating_texts.append(FloatingText("BOOM!", cx, cy, color=(255, 65, 65), size=38))
 
     def _draw_blade_trail(self, now: float):
-        self.pointer_history = [p for p in self.pointer_history if now - p[2] < 0.22]
+        self.pointer_history = [p for p in self.pointer_history if now - p[2] < 0.20]
         if len(self.pointer_history) < 2:
             return
 
+        _, _, outer_col, inner_col = self._compute_multiplier(self.streak)
         n = len(self.pointer_history)
         for i in range(1, n):
             x1, y1, _ = self.pointer_history[i - 1]
             x2, y2, _ = self.pointer_history[i]
             ratio = i / n
             thickness = max(2, int(14 * ratio))
-            pygame.draw.line(self.screen, (235, 115, 20), (x1, y1), (x2, y2), thickness + 4)
-            pygame.draw.line(self.screen, (255, 248, 200), (x1, y1), (x2, y2), max(1, thickness - 2))
+            pygame.draw.line(self.screen, outer_col, (x1, y1), (x2, y2), thickness + 4)
+            pygame.draw.line(self.screen, inner_col, (x1, y1), (x2, y2), max(1, thickness - 2))
 
         lx, ly, _ = self.pointer_history[-1]
-        pygame.draw.circle(self.screen, (240, 125, 15), (lx, ly), 13)
-        pygame.draw.circle(self.screen, (255, 250, 210), (lx, ly), 6)
+        pygame.draw.circle(self.screen, outer_col, (lx, ly), 13)
+        pygame.draw.circle(self.screen, inner_col, (lx, ly), 6)
 
     def _handle_gameplay_hand(self, pointer_pos, now: float):
-        if pointer_pos is None:
+        if pointer_pos is None or self.hand_tracker.hand_switched:
             self.pointer_history.clear()
             self.prev_pos = None
-            return
+            if pointer_pos is None:
+                return
 
         x, y = pointer_pos
         self.pointer_history.append((x, y, now))
@@ -191,28 +215,44 @@ class SoloFruitNinjaGame:
                         self._trigger_game_over()
                         break
                     else:
-                        self.score += 1
+                        self.streak += 1
+                        self.max_streak = max(self.max_streak, self.streak)
+                        self.multiplier, tier_lbl, _, _ = self._compute_multiplier(self.streak)
+
+                        pts = self.multiplier
+                        self.score += pts
                         self.sounds.play("slash")
 
-                        if now - self.last_slice_time < 0.38:
+                        if now - self.last_slice_time < 0.32:
                             self.combo_count += 1
                         else:
                             self.combo_count = 1
                         self.last_slice_time = now
 
                         bonus_txt = None
-                        if self.combo_count >= 3:
-                            bonus_pts = min(5, self.combo_count - 1)
-                            self.score += bonus_pts
-                            bonus_txt = f"COMBO x{self.combo_count}! +{bonus_pts}"
+                        if self.combo_count >= 2:
+                            slash_bonus = min(6, self.combo_count)
+                            self.score += slash_bonus
+                            if self.combo_count == 2:
+                                bonus_txt = f"DOUBLE SLASH! +{slash_bonus}"
+                            elif self.combo_count == 3:
+                                bonus_txt = f"TRIPLE SLASH! +{slash_bonus}"
+                            else:
+                                bonus_txt = f"MULTI SLASH x{self.combo_count}! +{slash_bonus}"
+                        elif self.streak in (5, 10, 20):
+                            bonus_txt = f"STREAK {self.streak}! {tier_lbl}"
 
-                        self._spawn_slice_effects(fruit, bonus_text=bonus_txt)
+                        if self.streak > 0 and self.streak % 20 == 0 and self.missed > 0:
+                            self.missed = max(0, self.missed - 1)
+                            bonus_txt = "FRENZY BONUS! NYAWA +1"
+
+                        self._spawn_slice_effects(fruit, pts_gained=pts, bonus_text=bonus_txt)
 
                         if self.score > self.personal_best:
                             self.personal_best = self.score
 
-                        if self.score // 25 + 1 > self.level:
-                            self.level = self.score // 25 + 1
+                        if self.score // 30 + 1 > self.level:
+                            self.level = self.score // 30 + 1
                             self.sounds.play("levelup")
                             self.floating_texts.append(
                                 FloatingText(
@@ -232,13 +272,20 @@ class SoloFruitNinjaGame:
                 missed_now = fruit.update(self.WIDTH, self.HEIGHT)
                 if missed_now and not fruit.is_bomb:
                     self.missed += 1
+                    miss_x = max(80, min(self.WIDTH - 80, fruit.x))
+                    if self.streak >= 5:
+                        self.floating_texts.append(
+                            FloatingText(f"STREAK {self.streak} PUTUS!", miss_x, self.HEIGHT - 78, color=(255, 145, 50), size=24)
+                        )
+                    self.streak = 0
+                    self.multiplier = 1
                     self.floating_texts.append(
-                        FloatingText("MISS!", max(60, min(self.WIDTH - 60, fruit.x)), self.HEIGHT - 45, color=(255, 90, 85), size=24)
+                        FloatingText("MISS!", miss_x, self.HEIGHT - 45, color=(255, 90, 85), size=24)
                     )
                     if self.missed >= 10 and not self.game_over:
                         self._trigger_game_over()
 
-            target_fruits = min(4 + (self.level - 1) // 2, 9)
+            target_fruits = min(3 + (self.level - 1) // 2, 8)
             while len(self.fruits) < target_fruits:
                 self.fruits.append(self.fruit_manager.spawn_fruit_solo(self.level))
 
@@ -260,7 +307,7 @@ class SoloFruitNinjaGame:
             self.floating_texts = [f for f in self.floating_texts if f.alive]
 
     def _draw_hud(self, cam_frame, pointer_pos, mouse_clicked: bool):
-        hud_rect = pygame.Rect(20, 18, 250, 118)
+        hud_rect = pygame.Rect(20, 18, 255, 118)
         draw_glass_panel(self.screen, hud_rect, border_radius=16)
 
         font_big = FontCache.get_title_font(34)
@@ -275,6 +322,21 @@ class SoloFruitNinjaGame:
         miss_col = (255, 95, 90) if self.missed >= 7 else (225, 180, 130)
         miss_surf = font_med.render(f"Terlewat: {self.missed} / 10", True, miss_col)
         self.screen.blit(miss_surf, (hud_rect.x + 18, hud_rect.y + 80))
+
+        # Badge Combo Streak Aktif (Tampil jika streak >= 3)
+        if self.streak >= 3:
+            mult, tier_lbl, outer_col, _ = self._compute_multiplier(self.streak)
+            streak_rect = pygame.Rect(20, 144, 255, 44)
+            draw_glass_panel(
+                self.screen,
+                streak_rect,
+                border_color=(*outer_col, 240),
+                border_radius=14,
+                border_width=2,
+            )
+            st_txt = f"STREAK {self.streak}  •  {tier_lbl}" if tier_lbl else f"STREAK {self.streak}  •  1x"
+            st_surf = font_med.render(st_txt, True, outer_col)
+            self.screen.blit(st_surf, st_surf.get_rect(center=streak_rect.center))
 
         # Tombol Ikon Pause di Pojok Kanan Atas
         pause_rect = pygame.Rect(self.WIDTH - 76, 20, 54, 54)
@@ -300,9 +362,7 @@ class SoloFruitNinjaGame:
             self.screen.blit(pip_surf, pip_rect.topleft)
 
     def _draw_pause_modal(self, mouse_clicked: bool) -> str | None:
-        overlay = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
-        overlay.fill((12, 8, 5, 185))
-        self.screen.blit(overlay, (0, 0))
+        self.screen.blit(self._modal_overlay, (0, 0))
 
         cx, cy = self.WIDTH // 2, self.HEIGHT // 2
         card_rect = pygame.Rect(0, 0, 500, 430)
@@ -404,9 +464,7 @@ class SoloFruitNinjaGame:
         return None
 
     def _draw_gameover_modal(self, mouse_clicked: bool) -> str | None:
-        overlay = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
-        overlay.fill((12, 8, 5, 190))
-        self.screen.blit(overlay, (0, 0))
+        self.screen.blit(self._modal_overlay, (0, 0))
 
         elapsed = pygame.time.get_ticks() - self.go_start_ticks
         if self.show_go_screen and elapsed < self.GO_DURATION:
@@ -419,7 +477,7 @@ class SoloFruitNinjaGame:
         self.show_go_screen = False
         cx, cy = self.WIDTH // 2, self.HEIGHT // 2
 
-        card_rect = pygame.Rect(0, 0, 520, 395)
+        card_rect = pygame.Rect(0, 0, 520, 420)
         card_rect.center = (cx, cy)
         draw_glass_panel(self.screen, card_rect, border_radius=24)
 
@@ -432,16 +490,17 @@ class SoloFruitNinjaGame:
             badge = badge_font.render("REKOR BARU TERCAPAI!", True, (110, 255, 150))
             self.screen.blit(badge, badge.get_rect(center=(cx, card_rect.top + 88)))
 
-        info_font = FontCache.get_ui_font(22, bold=True)
+        info_font = FontCache.get_ui_font(21, bold=True)
         rows = [
             ("Pemain", self.current_user.get("username", "Tamu")),
             ("Skor Akhir", str(self.score)),
             ("Skor Tertinggi", str(self.personal_best)),
+            ("Streak Terbaik", f"{self.max_streak} Buah"),
             ("Level Tercapai", f"Level {self.level}"),
         ]
-        start_y = card_rect.top + 125
+        start_y = card_rect.top + 120
         for i, (label, val) in enumerate(rows):
-            y_pos = start_y + i * 38
+            y_pos = start_y + i * 36
             lbl_s = info_font.render(label, True, (215, 190, 155))
             val_s = info_font.render(val, True, (255, 250, 240))
             self.screen.blit(lbl_s, (card_rect.left + 55, y_pos))
@@ -531,7 +590,7 @@ class SoloFruitNinjaGame:
                     self.WIDTH,
                     self.HEIGHT,
                     finger_mode=self.settings.finger_mode,
-                    require_raised=(not self.game_over and not self.paused),
+                    require_raised=True,
                 )
 
             self.hand_cursor.update_pointer(pointer_pos, dwell_time=self.settings.dwell_time)
@@ -570,7 +629,7 @@ class SoloFruitNinjaGame:
                 self.hand_cursor.draw_cursor(self.screen)
 
             pygame.display.flip()
-            self.clock.tick(38)
+            self.clock.tick(60)
 
         self._cleanup()
         return "menu"

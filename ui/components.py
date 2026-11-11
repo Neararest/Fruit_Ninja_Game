@@ -78,6 +78,10 @@ def truncate_text(font: pygame.font.Font, text: str, max_width: int) -> str:
     return trimmed + "..."
 
 
+_PANEL_CACHE = {}
+_SHADOW_CACHE = {}
+
+
 def draw_glass_panel(
     surface: pygame.Surface,
     rect: pygame.Rect,
@@ -89,44 +93,54 @@ def draw_glass_panel(
 ):
     """
     Menggambar panel bergaya papan Dojo Kayu & Bingkai Emas yang menyatu dengan tema Fruit Ninja.
+    Menggunakan cache pygame.Surface agar rendering mencapai 60 FPS stabil tanpa alokasi berulang.
     """
     if shadow:
-        shadow_surf = pygame.Surface((rect.width + 14, rect.height + 14), pygame.SRCALPHA)
-        pygame.draw.rect(
-            shadow_surf,
-            (0, 0, 0, 130),
-            pygame.Rect(0, 0, rect.width + 14, rect.height + 14),
-            border_radius=border_radius + 4,
-        )
+        s_key = (rect.width + 14, rect.height + 14, border_radius + 4, 130)
+        shadow_surf = _SHADOW_CACHE.get(s_key)
+        if shadow_surf is None:
+            shadow_surf = pygame.Surface((rect.width + 14, rect.height + 14), pygame.SRCALPHA)
+            pygame.draw.rect(
+                shadow_surf,
+                (0, 0, 0, 130),
+                pygame.Rect(0, 0, rect.width + 14, rect.height + 14),
+                border_radius=border_radius + 4,
+            )
+            _SHADOW_CACHE[s_key] = shadow_surf
         surface.blit(shadow_surf, (rect.x - 3, rect.y + 7))
 
-    panel_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-    pygame.draw.rect(
-        panel_surf,
-        bg_color,
-        pygame.Rect(0, 0, rect.width, rect.height),
-        border_radius=border_radius,
-    )
-
-    # Garis aksen dalam kayu hangat
-    if rect.width > 40 and rect.height > 40:
-        inner_rect = pygame.Rect(5, 5, rect.width - 10, rect.height - 10)
+    p_key = (rect.width, rect.height, bg_color, border_color, border_radius, border_width)
+    panel_surf = _PANEL_CACHE.get(p_key)
+    if panel_surf is None:
+        panel_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
         pygame.draw.rect(
             panel_surf,
-            (85, 55, 32, 140),
-            inner_rect,
-            width=1,
-            border_radius=max(4, border_radius - 4),
-        )
-
-    if border_width > 0:
-        pygame.draw.rect(
-            panel_surf,
-            border_color,
+            bg_color,
             pygame.Rect(0, 0, rect.width, rect.height),
-            width=border_width,
             border_radius=border_radius,
         )
+
+        # Garis aksen dalam kayu hangat
+        if rect.width > 40 and rect.height > 40:
+            inner_rect = pygame.Rect(5, 5, rect.width - 10, rect.height - 10)
+            pygame.draw.rect(
+                panel_surf,
+                (85, 55, 32, 140),
+                inner_rect,
+                width=1,
+                border_radius=max(4, border_radius - 4),
+            )
+
+        if border_width > 0:
+            pygame.draw.rect(
+                panel_surf,
+                border_color,
+                pygame.Rect(0, 0, rect.width, rect.height),
+                width=border_width,
+                border_radius=border_radius,
+            )
+        _PANEL_CACHE[p_key] = panel_surf
+
     surface.blit(panel_surf, rect.topleft)
 
 
@@ -173,7 +187,8 @@ def draw_icon(surface: pygame.Surface, icon_name: str, center: tuple, size: int 
 
 class HandCursorManager:
     """
-    Mengelola posisi kursor tangan dan mekanisme klik tahan jari (Dwell Click) tanpa teks berlebih.
+    Mengelola posisi kursor tangan dan mekanisme klik tahan jari (Dwell Click) dengan
+    anti-flicker & toleransi getaran jari agar sangat mudah menekan tombol menu.
     """
 
     def __init__(self, dwell_time: float = 1.2):
@@ -181,6 +196,7 @@ class HandCursorManager:
         self.pointer_pos = None
         self.hovered_id = None
         self.hover_start_time = 0.0
+        self.last_hover_seen = 0.0
         self.last_click_time = 0.0
         self.cooldown = 0.65
         self.current_progress = 0.0
@@ -190,21 +206,31 @@ class HandCursorManager:
             self.dwell_time = dwell_time
         self.pointer_pos = pos
         if pos is None:
-            self.hovered_id = None
-            self.current_progress = 0.0
+            # Beri toleransi 0.22 detik sebelum mereset progress klik jika tangan sempat berkedip
+            if self.hovered_id is not None and (time.time() - self.last_hover_seen) > 0.22:
+                self.hovered_id = None
+                self.current_progress = 0.0
 
     def check_dwell_click(self, btn_id, rect: pygame.Rect) -> tuple[bool, bool, float]:
+        now = time.time()
         if self.pointer_pos is None:
+            if self.hovered_id == btn_id and (now - self.last_hover_seen) <= 0.22:
+                return True, False, self.current_progress
             return False, False, 0.0
 
-        padded = rect.inflate(14, 14)
+        # Area magnetik tombol diperluas (+22px) agar jari tidak mudah tergelincir keluar tombol
+        padded = rect.inflate(22, 22)
         if not padded.collidepoint(self.pointer_pos):
             if self.hovered_id == btn_id:
+                if (now - self.last_hover_seen) <= 0.22:
+                    # Jari sedikit bergeser keluar sesaat: tahan progress agar tidak langsung hilang ke 0
+                    self.hover_start_time += 0.016
+                    return True, False, self.current_progress
                 self.hovered_id = None
                 self.current_progress = 0.0
             return False, False, 0.0
 
-        now = time.time()
+        self.last_hover_seen = now
         if now - self.last_click_time < self.cooldown:
             return True, False, 0.0
 
@@ -214,7 +240,7 @@ class HandCursorManager:
             self.current_progress = 0.0
             return True, False, 0.0
 
-        elapsed = now - self.hover_start_time
+        elapsed = max(0.0, now - self.hover_start_time)
         progress = min(1.0, elapsed / max(0.3, self.dwell_time))
         self.current_progress = progress
 
@@ -232,8 +258,12 @@ class HandCursorManager:
 
         x, y = int(self.pointer_pos[0]), int(self.pointer_pos[1])
 
-        glow_surf = pygame.Surface((68, 68), pygame.SRCALPHA)
-        pygame.draw.circle(glow_surf, (255, 195, 50, 60), (34, 34), 24)
+        glow_key = ("cursor_glow", 68)
+        glow_surf = _SHADOW_CACHE.get(glow_key)
+        if glow_surf is None:
+            glow_surf = pygame.Surface((68, 68), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surf, (255, 195, 50, 60), (34, 34), 24)
+            _SHADOW_CACHE[glow_key] = glow_surf
         surface.blit(glow_surf, (x - 34, y - 34))
 
         if self.current_progress > 0.02:
@@ -293,8 +323,12 @@ class ModernButtonManager:
 
         shadow_rect = draw_rect.copy()
         shadow_rect.y += 4
-        shadow_surf = pygame.Surface((shadow_rect.width, shadow_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(shadow_surf, (0, 0, 0, 125), shadow_surf.get_rect(), border_radius=border_radius)
+        s_key = (shadow_rect.width, shadow_rect.height, border_radius, 125)
+        shadow_surf = _SHADOW_CACHE.get(s_key)
+        if shadow_surf is None:
+            shadow_surf = pygame.Surface((shadow_rect.width, shadow_rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(shadow_surf, (0, 0, 0, 125), shadow_surf.get_rect(), border_radius=border_radius)
+            _SHADOW_CACHE[s_key] = shadow_surf
         surface.blit(shadow_surf, shadow_rect.topleft)
 
         bg_col = colors["bg_hover"] if is_hover else colors["bg"]
@@ -371,8 +405,12 @@ class ModernButtonManager:
 
         shadow_rect = draw_rect.copy()
         shadow_rect.y += 4
-        shadow_surf = pygame.Surface((shadow_rect.width, shadow_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(shadow_surf, (0, 0, 0, 130), shadow_surf.get_rect(), border_radius=radius)
+        s_key = (shadow_rect.width, shadow_rect.height, radius, 130)
+        shadow_surf = _SHADOW_CACHE.get(s_key)
+        if shadow_surf is None:
+            shadow_surf = pygame.Surface((shadow_rect.width, shadow_rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(shadow_surf, (0, 0, 0, 130), shadow_surf.get_rect(), border_radius=radius)
+            _SHADOW_CACHE[s_key] = shadow_surf
         surface.blit(shadow_surf, shadow_rect.topleft)
 
         bg_col = colors["bg_hover"] if is_hover else colors["bg"]

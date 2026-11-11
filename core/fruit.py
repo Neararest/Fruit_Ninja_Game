@@ -48,7 +48,7 @@ class Fruit:
         self.height = surf.get_height()
 
         self.angle = random.uniform(0, 360)
-        self.angular_vel = random.uniform(-3.2, 3.2)
+        self.angular_vel = random.uniform(-1.8, 1.8)
         self.spawn_delay = int(spawn_delay)
         self.has_entered_screen = False
         self.alive = True
@@ -94,7 +94,13 @@ class Fruit:
     def draw(self, screen: pygame.Surface):
         if not self.alive or self.cut or self.spawn_delay > 0:
             return
-        rotated = pygame.transform.rotate(self.base_surf, self.angle)
+        quant_angle = (int(self.angle) // 6) * 6
+        if not hasattr(self, "_rot_cache"):
+            self._rot_cache = {}
+        rotated = self._rot_cache.get(quant_angle)
+        if rotated is None:
+            rotated = pygame.transform.rotate(self.base_surf, quant_angle)
+            self._rot_cache[quant_angle] = rotated
         rect = rotated.get_rect(center=(int(self.x + self.width / 2), int(self.y + self.height / 2)))
         screen.blit(rotated, rect.topleft)
 
@@ -104,11 +110,20 @@ class Fruit:
 
     @property
     def rect(self) -> pygame.Rect:
+        if self.is_bomb:
+            # Hitbox bom sedikit diperkecil agar adil (tidak meledak hanya karena terserempet tipis)
+            return pygame.Rect(
+                int(self.x) + 8,
+                int(self.y) + 8,
+                max(10, self.width - 16),
+                max(10, self.height - 16),
+            )
+        # Hitbox buah diperluas +12px di tiap sisi agar tebasan terasa sangat responsif dan tidak miss koordinat
         return pygame.Rect(
-            int(self.x) + 6,
-            int(self.y) + 6,
-            max(10, self.width - 12),
-            max(10, self.height - 12),
+            int(self.x) - 12,
+            int(self.y) - 12,
+            self.width + 24,
+            self.height + 24,
         )
 
 
@@ -192,22 +207,25 @@ class FloatingText:
         self.text = text
         self.x = float(x)
         self.y = float(y)
-        self.vy = -2.2
+        self.vy = -1.8
         self.color = color
         self.size = size
         self.alpha = 255
         self.alive = True
+        self._cached_surf = None
 
     def update(self):
         self.y += self.vy
-        self.alpha -= 7
+        self.alpha -= 5
         if self.alpha <= 0:
             self.alive = False
 
     def draw(self, screen: pygame.Surface, font: pygame.font.Font):
         if not self.alive:
             return
-        txt_surf = font.render(self.text, True, self.color)
+        if self._cached_surf is None:
+            self._cached_surf = font.render(self.text, True, self.color)
+        txt_surf = self._cached_surf
         if self.alpha < 255:
             txt_surf.set_alpha(max(0, self.alpha))
         rect = txt_surf.get_rect(center=(int(self.x), int(self.y)))
@@ -320,25 +338,25 @@ class FruitManager:
         start_x = random.randint(min_x, max(min_x + 10, max_x))
         start_y = self.HEIGHT + random.randint(15, 55)
 
-        # Gravitasi bertambah seiring kenaikan level sehingga lemparan & jatuhnya makin cepat
-        gravity = 0.36 + min(0.32, (level - 1) * 0.04)
+        # Gravitasi dibuat santai di awal permainan (Level 1) dan meningkat perlahan sesuai level
+        gravity = 0.095 + min(0.14, (level - 1) * 0.016)
 
-        # Target ketinggian puncak lemparan (antara 9% s/d 38% dari bagian atas layar)
-        peak_y = random.randint(int(self.HEIGHT * 0.09), int(self.HEIGHT * 0.38))
-        travel_h = max(220, start_y - peak_y)
+        # Target ketinggian puncak lemparan (antara 12% s/d 38% dari bagian atas layar)
+        peak_y = random.randint(int(self.HEIGHT * 0.12), int(self.HEIGHT * 0.38))
+        travel_h = max(210, start_y - peak_y)
 
         # Kecepatan vertikal awal ke atas (bernilai negatif karena sumbu Y ke atas = negatif)
         vy = -math.sqrt(2.0 * gravity * travel_h)
 
         # Waktu total melayang di udara (naik + turun) dalam satuan frame
-        total_frames = max(35.0, (2.0 * abs(vy)) / gravity)
+        total_frames = max(65.0, (2.0 * abs(vy)) / gravity)
 
         # Target titik jatuh horizontal tetap berada di dalam zona aman [min_x, max_x]
         target_x = random.randint(min_x, max(min_x + 10, max_x))
         vx = (target_x - start_x) / total_frames
-        vx = max(-5.5, min(5.5, vx))
+        vx = max(-2.6, min(2.6, vx))
 
-        delay = random.randint(0, 28)
+        delay = random.randint(12, 58)
         return start_x, start_y, vx, vy, gravity, delay
 
     def spawn_fruit_solo(self, level: int) -> Fruit:
