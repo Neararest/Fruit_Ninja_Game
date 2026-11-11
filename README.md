@@ -4,10 +4,9 @@ Game Fruit Ninja berbasis Python, OpenCV, MediaPipe, dan Pygame dengan mode Solo
 
 ## Fitur
 
-- Pelacakan tangan menggunakan kamera dengan dukungan navigasi mouse dan gestur tangan di menu.
 - Sistem akun pemain (masuk, daftar akun baru, atau bermain sebagai tamu) dengan penyimpanan otomatis di database SQLite.
 - Mode Solo dengan perhitungan skor, peningkatan level, batas maksimal 10 buah terlewat, bom, serta sistem combo streak (pengali poin hingga 4x) dan bonus tebasan ganda.
-- Mode Duel Multiplayer untuk 2 pemain dalam satu kamera (sisi kiri dan sisi kanan layar) dengan batas waktu 90 detik, batas 10 buah terlewat per pemain, penanda layar gelap ketika salah satu pemain gugur, serta combo streak masing-masing pemain.
+- Mode Duel Multiplayer untuk 2 pemain dalam satu kamera (sisi kiri dan sisi kanan layar) dengan batas waktu 90 detik, batas 10 buah terlewat per pemain, penanda layar gelap ketika salah satu pemain gugur, combo streak masing-masing pemain.
 - Papan peringkat untuk Mode Solo dan Duel Multiplayer beserta fitur ekspor data peringkat ke file Excel.
 - Pengaturan musik latar, efek suara, pilihan jari yang dilacak kamera, durasi tahan klik pada menu, dan pratinjau kamera mini.
 - Pilihan tema arena permainan, yaitu Gurun Kaktus, Dojo Kayu, Lembah Salju, dan Taman Sakura.
