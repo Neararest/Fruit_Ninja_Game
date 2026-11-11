@@ -4,7 +4,7 @@ Game Fruit Ninja berbasis Python, OpenCV, MediaPipe, dan Pygame dengan mode Solo
 
 ## Fitur
 
-- Sistem akun pemain (masuk, daftar akun baru, atau bermain sebagai tamu) dengan penyimpanan otomatis di database SQLite.
+- Sistem akun pemain (masuk, daftar akun baru, atau bermain sebagai tamu).
 - Mode Solo dengan perhitungan skor, peningkatan level, batas maksimal 10 buah terlewat, bom, serta sistem combo streak (pengali poin hingga 4x) dan bonus tebasan ganda.
 - Mode Duel Multiplayer untuk 2 pemain dalam satu kamera (sisi kiri dan sisi kanan layar) dengan batas waktu 90 detik, batas 10 buah terlewat per pemain, penanda layar gelap ketika salah satu pemain gugur, combo streak masing-masing pemain.
 - Papan peringkat untuk Mode Solo dan Duel Multiplayer beserta fitur ekspor data peringkat ke file Excel.
@@ -13,10 +13,9 @@ Game Fruit Ninja berbasis Python, OpenCV, MediaPipe, dan Pygame dengan mode Solo
 
 ## Kebutuhan
 
-- Python 3.10 atau lebih baru
+- Python 3.12 atau kebawah
 - PIP
 - Webcam
-- Sistem operasi Windows, macOS, atau Linux yang mendukung Python dan Pygame
 
 Semua pustaka yang dibutuhkan tercantum pada file `requirements.txt`.
 
