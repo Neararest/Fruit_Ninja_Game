@@ -1,4 +1,5 @@
 import math
+import os
 import time
 import pygame
 
@@ -129,61 +130,45 @@ def draw_glass_panel(
     surface.blit(panel_surf, rect.topleft)
 
 
-def draw_vector_icon(surface: pygame.Surface, icon_name: str, center: tuple, size: int = 26, color=(255, 250, 240)):
-    cx, cy = int(center[0]), int(center[1])
-    r = size // 2
+class IconCache:
+    """
+    Memuat dan menyimpan cache gambar ikon PNG dari folder assets/icons/.
+    """
 
-    if icon_name == "play":
-        pts = [(cx - r // 2 + 1, cy - r + 1), (cx - r // 2 + 1, cy + r - 1), (cx + r, cy)]
-        pygame.draw.polygon(surface, color, pts)
-    elif icon_name == "solo":
-        pygame.draw.line(surface, color, (cx - r, cy + r), (cx + r, cy - r), 4)
-        pygame.draw.line(surface, color, (cx - r // 2 - 4, cy + 2), (cx - 2, cy + r // 2 + 4), 3)
-    elif icon_name == "multi":
-        pygame.draw.line(surface, color, (cx - r, cy + r), (cx + r, cy - r), 3)
-        pygame.draw.line(surface, color, (cx - r, cy - r), (cx + r, cy + r), 3)
-    elif icon_name == "trophy":
-        cup_rect = pygame.Rect(cx - r // 2 - 1, cy - r + 1, r + 2, int(r * 1.1))
-        pygame.draw.rect(surface, color, cup_rect, border_bottom_left_radius=6, border_bottom_right_radius=6)
-        pygame.draw.line(surface, color, (cx, cy + 2), (cx, cy + r - 2), 3)
-        pygame.draw.line(surface, color, (cx - r // 2, cy + r - 2), (cx + r // 2, cy + r - 2), 3)
-    elif icon_name == "settings":
-        pygame.draw.circle(surface, color, (cx, cy), r - 3, 3)
-        pygame.draw.circle(surface, color, (cx, cy), 4)
-        for deg in range(0, 360, 45):
-            rad = math.radians(deg)
-            x1 = cx + int((r - 4) * math.cos(rad))
-            y1 = cy + int((r - 4) * math.sin(rad))
-            x2 = cx + int((r + 2) * math.cos(rad))
-            y2 = cy + int((r + 2) * math.sin(rad))
-            pygame.draw.line(surface, color, (x1, y1), (x2, y2), 3)
-    elif icon_name == "theme":
-        rect = pygame.Rect(cx - r, cy - r + 2, r * 2, r * 2 - 4)
-        pygame.draw.rect(surface, color, rect, 2, border_radius=4)
-        pygame.draw.circle(surface, color, (cx - r // 3, cy - r // 4), 3)
-        pygame.draw.polygon(surface, color, [(cx - r + 3, cy + r - 4), (cx + 1, cy), (cx + r - 3, cy + r - 4)])
-    elif icon_name == "back":
-        pygame.draw.line(surface, color, (cx + r - 2, cy), (cx - r + 2, cy), 3)
-        pygame.draw.lines(surface, color, False, [(cx - 2, cy - r + 4), (cx - r + 2, cy), (cx - 2, cy + r - 4)], 3)
-    elif icon_name == "exit":
-        pygame.draw.line(surface, color, (cx - r + 3, cy - r + 3), (cx + r - 3, cy + r - 3), 3)
-        pygame.draw.line(surface, color, (cx + r - 3, cy - r + 3), (cx - r + 3, cy + r - 3), 3)
-    elif icon_name == "pause":
-        bar_w = max(3, r // 2 - 1)
-        pygame.draw.rect(surface, color, pygame.Rect(cx - r // 2 - 2, cy - r + 2, bar_w, (r - 2) * 2), border_radius=2)
-        pygame.draw.rect(surface, color, pygame.Rect(cx + r // 2 - bar_w + 2, cy - r + 2, bar_w, (r - 2) * 2), border_radius=2)
-    elif icon_name == "replay":
-        rect = pygame.Rect(cx - r + 2, cy - r + 2, (r - 2) * 2, (r - 2) * 2)
-        pygame.draw.arc(surface, color, rect, 0.4, 5.5, 3)
-        pygame.draw.polygon(surface, color, [(cx + r - 2, cy - 6), (cx + r + 3, cy + 2), (cx + r - 7, cy + 2)])
-    elif icon_name == "save":
-        pygame.draw.line(surface, color, (cx, cy - r + 2), (cx, cy + 4), 3)
-        pygame.draw.lines(surface, color, False, [(cx - 6, cy - 2), (cx, cy + 5), (cx + 6, cy - 2)], 3)
-        pygame.draw.line(surface, color, (cx - r + 2, cy + r - 2), (cx + r - 2, cy + r - 2), 3)
-    elif icon_name == "user":
-        pygame.draw.circle(surface, color, (cx, cy - r // 3), r // 2, 2)
-        arc_rect = pygame.Rect(cx - r + 2, cy + 1, (r - 2) * 2, r)
-        pygame.draw.arc(surface, color, arc_rect, 0, math.pi, 2)
+    _raw_cache = {}
+    _scaled_cache = {}
+    ICON_DIR = "assets/icons"
+
+    @classmethod
+    def get_icon(cls, icon_name: str, size: int) -> pygame.Surface | None:
+        key = (icon_name, size)
+        if key in cls._scaled_cache:
+            return cls._scaled_cache[key]
+
+        if icon_name not in cls._raw_cache:
+            path = os.path.join(cls.ICON_DIR, f"{icon_name}.png")
+            if os.path.exists(path):
+                try:
+                    cls._raw_cache[icon_name] = pygame.image.load(path).convert_alpha()
+                except Exception:
+                    cls._raw_cache[icon_name] = None
+            else:
+                cls._raw_cache[icon_name] = None
+
+        raw = cls._raw_cache[icon_name]
+        if raw is None:
+            return None
+
+        scaled = pygame.transform.smoothscale(raw, (size, size))
+        cls._scaled_cache[key] = scaled
+        return scaled
+
+
+def draw_icon(surface: pygame.Surface, icon_name: str, center: tuple, size: int = 28):
+    icon_surf = IconCache.get_icon(icon_name, size)
+    if icon_surf is not None:
+        rect = icon_surf.get_rect(center=(int(center[0]), int(center[1])))
+        surface.blit(icon_surf, rect.topleft)
 
 
 class HandCursorManager:
@@ -334,11 +319,12 @@ class ModernButtonManager:
         txt_surf = font.render(text, True, colors["text"])
 
         if icon:
-            icon_space = 30
+            icon_size = min(30, max(22, int(draw_h * 0.56)))
+            icon_space = icon_size + 10
             total_w = icon_space + txt_surf.get_width()
             start_x = draw_rect.centerx - total_w // 2
-            icon_center = (start_x + 11, draw_rect.centery)
-            draw_vector_icon(surface, icon, icon_center, size=22, color=colors["text"])
+            icon_center = (start_x + icon_size // 2, draw_rect.centery)
+            draw_icon(surface, icon, icon_center, size=icon_size)
             txt_rect = txt_surf.get_rect(midleft=(start_x + icon_space, draw_rect.centery))
         else:
             txt_rect = txt_surf.get_rect(center=draw_rect.center)
@@ -400,7 +386,7 @@ class ModernButtonManager:
         border_col = (255, 240, 180) if is_hover else colors["border"]
         pygame.draw.rect(surface, border_col, draw_rect, width=3 if is_hover else 2, border_radius=radius)
 
-        draw_vector_icon(surface, icon, draw_rect.center, size=int(min(draw_w, draw_h) * 0.46), color=colors["text"])
+        draw_icon(surface, icon, draw_rect.center, size=int(min(draw_w, draw_h) * 0.62))
 
         if is_hover and tooltip:
             tip_font = FontCache.get_ui_font(14, bold=True)
