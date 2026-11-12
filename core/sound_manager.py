@@ -48,7 +48,7 @@ class SoundManager:
             return
         s = self.sounds.get(key)
         if s:
-            if self.settings:
+            if self.settings: #testing
                 s.set_volume(self.settings.sfx_volume)
             s.play()
 
